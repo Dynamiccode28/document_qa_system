@@ -1,42 +1,81 @@
 import streamlit as st
+import numpy as np
+import faiss
 import requests
+import os
+import sys
+
+# --- IMPORT RAG COMPONENTS DIRECTLY ---
+from src.pdf_extractor import extract_text_from_pdf
+from src.text_chunker import chunk_text
+from src.embedder import model
+from src.prompt_builder import build_rag_prompt
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="RAG Document QA", page_icon="📄")
 
-# --- SESSION STATE INITIALIZATION ---
-# This list survives screen reruns!
+# --- SESSION STATE (Replaces FastAPI Global Variables) ---
+if "vector_index" not in st.session_state:
+    st.session_state.vector_index = None
+if "text_chunks" not in st.session_state:
+    st.session_state.text_chunks = None
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- HELPER FUNCTIONS TO TALK TO FASTAPI ---
+# --- BACKEND LOGIC (Runs directly in Streamlit) ---
 
-def upload_file_to_api(file):
-    """Sends the uploaded PDF to the FastAPI /upload endpoint."""
-    url = "http://localhost:8000/upload"
-    # FastAPI expects files in a specific dictionary format
-    files = {"file": (file.name, file.getvalue(), "application/pdf")}
-    try:
-        response = requests.post(url, files=files, timeout=60)
-        response.raise_for_status() # Raise error if API returns 400/500
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        return {"error": str(e)}
+def process_pdf_locally(file):
+    """Does what our FastAPI /upload endpoint used to do."""
+    save_path = os.path.join("data", file.name)
+    with open(save_path, "wb") as f:
+        f.write(file.getvalue())
+        
+    raw_text = extract_text_from_pdf(save_path)
+    chunks = chunk_text(raw_text)
+    
+    embeddings = model.encode(chunks)
+    embeddings = np.array(embeddings).astype('float32')
+    
+    dimension = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embeddings)
+    
+    # Save to session state so it survives reruns
+    st.session_state.vector_index = index
+    st.session_state.text_chunks = chunks
+    
+    return f"Processed {len(chunks)} chunks successfully."
 
-def ask_question_to_api(question):
-    """Sends the question to the FastAPI /ask endpoint."""
-    url = "http://localhost:8000/ask"
-    data = {"text": question}
+def ask_question_locally(question):
+    """Does what our FastAPI /ask endpoint used to do."""
+    if st.session_state.vector_index is None:
+        return {"error": "Please upload a document first."}
+        
+    query_vector = model.encode([question]).astype('float32')
+    distances, indices = st.session_state.vector_index.search(query_vector, k=3)
+    retrieved_chunks = [st.session_state.text_chunks[idx] for idx in indices[0]]
+    
+    # Call Hugging Face API for the LLM
+    final_messages = build_rag_prompt(question, retrieved_chunks)
+    hf_token = os.getenv("HF_TOKEN")
+    hf_url = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
+    
+    headers = {"Authorization": f"Bearer {hf_token}", "Content-Type": "application/json"}
+    data = {"messages": final_messages, "max_tokens": 500}
+    
     try:
-        response = requests.post(url, json=data, timeout=60)
+        response = requests.post(hf_url, headers=headers, json=data)
         response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
+        result_json = response.json()
+        answer = result_json[0]["generated_text"]
+        if "assistant" in answer:
+            answer = answer.split("assistant")[-1].strip()
+        return {"answer": answer, "sources": retrieved_chunks}
+    except Exception as e:
         return {"error": str(e)}
 
-# --- USER INTERFACE LAYOUT ---
+# --- USER INTERFACE ---
 
-# Put the upload feature in a sidebar so it doesn't clutter the chat
 with st.sidebar:
     st.header("📁 Document Upload")
     uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
@@ -44,51 +83,34 @@ with st.sidebar:
     if uploaded_file is not None:
         if st.button("Process Document"):
             with st.spinner("Extracting text, generating embeddings..."):
-                result = upload_file_to_api(uploaded_file)
-                if "error" in result:
-                    st.error(f"Failed: {result['error']}")
-                else:
-                    st.success(result["message"])
-                    # Clear old chat history when a new document is loaded
-                    st.session_state.messages = []
+                result = process_pdf_locally(uploaded_file)
+                st.success(result)
+                st.session_state.messages = [] # Clear chat history
 
-# Main chat area
 st.title("💬 Chat with your Document")
 
-# 1. Redraw all previous messages from session state
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 2. Wait for new user input (this creates the chat box at the bottom)
 if prompt := st.chat_input("Ask a question about your document..."):
-    
-    # A. Display user message immediately
     with st.chat_message("user"):
         st.markdown(prompt)
-    
-    # B. Save user message to session state
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # C. Send to FastAPI and get response
     with st.spinner("Thinking..."):
-        response = ask_question_to_api(prompt)
+        response = ask_question_locally(prompt)
     
-    # D. Format the answer
     if "error" in response:
         answer = f"❌ Error: {response['error']}"
     else:
         answer = response.get("answer", "No answer received.")
     
-    # E. Display assistant message
     with st.chat_message("assistant"):
         st.markdown(answer)
-        
-        # Add a cool dropdown to show the sources used!
         if "sources" in response and response["sources"]:
             with st.expander("📄 View Source Chunks"):
                 for i, source in enumerate(response["sources"]):
                     st.text_area(f"Chunk {i+1}", value=source, height=100, key=f"src_{i}_{prompt}")
     
-    # F. Save assistant message to session state
     st.session_state.messages.append({"role": "assistant", "content": answer})
