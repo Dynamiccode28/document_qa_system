@@ -8,7 +8,7 @@ import sys
 # --- IMPORT RAG COMPONENTS DIRECTLY ---
 from src.pdf_extractor import extract_text_from_pdf
 from src.text_chunker import chunk_text
-from src.embedder import model
+from src.embeder import model
 from src.prompt_builder import build_rag_prompt
 
 # --- PAGE CONFIG ---
