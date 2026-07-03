@@ -75,19 +75,35 @@ def ask_question(request: QuestionRequest):
     distances, indices = vector_index.search(query_vector, k=3)
     retrieved_chunks = [text_chunks[idx] for idx in indices[0]]
     
-    # 3. Build the prompt and ask Ollama
-    final_prompt = build_rag_prompt(request.text, retrieved_chunks)
+    # 3. Build the prompt and ask Hugging Face Serverless API
+    import os
+    final_messages = build_rag_prompt(request.text, retrieved_chunks)
     
-    url = "http://localhost:11434/api/generate"
+    # We will set this 'HF_TOKEN' in the cloud dashboard later
+    hf_token = os.getenv("HF_TOKEN") 
+    hf_url = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
+    
+    headers = {
+        "Authorization": f"Bearer {hf_token}",
+        "Content-Type": "application/json"
+    }
+    
     data = {
-        "model": "llama3.1:8b", # or llama3.2:3b
-        "prompt": final_prompt,
-        "stream": False
+        "messages": final_messages,
+        "max_tokens": 500
     }
     
     try:
-        response = requests.post(url, json=data)
-        answer = response.json().get("response", "Error: Ollama returned an empty response.")
+        response = requests.post(hf_url, headers=headers, json=data)
+        response.raise_for_status()
+        
+        # HF API returns the answer inside a list with a 'generated_text' key
+        result_json = response.json()
+        answer = result_json[0]["generated_text"]
+        
+        # The HF API sometimes echoes the prompt, we just want the assistant's reply
+        if "assistant" in answer:
+            answer = answer.split("assistant")[-1].strip()
         
         return {
             "answer": answer,
