@@ -1,20 +1,32 @@
 import streamlit as st
 import numpy as np
 import faiss
-import requests
 import os
 import sys
 
-# --- IMPORT RAG COMPONENTS DIRECTLY ---
+# --- IMPORT RAG COMPONENTS ---
 from src.pdf_extractor import extract_text_from_pdf
 from src.text_chunker import chunk_text
 from src.embeder import model
-from src.prompt_builder import build_rag_prompt
+
+# --- IMPORT TINY LOCAL LLM ---
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="RAG Document QA", page_icon="📄")
 
-# --- SESSION STATE (Replaces FastAPI Global Variables) ---
+# --- LOAD TINY LLM (Happens once when the app starts) ---
+@st.cache_resource
+def load_tiny_llm():
+    print("Loading local Qwen 0.5B LLM...")
+    model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    lm_model = AutoModelForCausalLM.from_pretrained(model_name)
+    return pipeline("text-generation", model=lm_model, tokenizer=tokenizer, max_new_tokens=200, do_sample=False)
+
+tiny_llm = load_tiny_llm()
+
+# --- SESSION STATE ---
 if "vector_index" not in st.session_state:
     st.session_state.vector_index = None
 if "text_chunks" not in st.session_state:
@@ -22,10 +34,8 @@ if "text_chunks" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- BACKEND LOGIC (Runs directly in Streamlit) ---
-
+# --- BACKEND LOGIC ---
 def process_pdf_locally(file):
-    """Does what our FastAPI /upload endpoint used to do."""
     save_path = os.path.join("data", file.name)
     with open(save_path, "wb") as f:
         f.write(file.getvalue())
@@ -40,14 +50,11 @@ def process_pdf_locally(file):
     index = faiss.IndexFlatL2(dimension)
     index.add(embeddings)
     
-    # Save to session state so it survives reruns
     st.session_state.vector_index = index
     st.session_state.text_chunks = chunks
-    
     return f"Processed {len(chunks)} chunks successfully."
 
 def ask_question_locally(question):
-    """Does what our FastAPI /ask endpoint used to do."""
     if st.session_state.vector_index is None:
         return {"error": "Please upload a document first."}
         
@@ -55,27 +62,21 @@ def ask_question_locally(question):
     distances, indices = st.session_state.vector_index.search(query_vector, k=3)
     retrieved_chunks = [st.session_state.text_chunks[idx] for idx in indices[0]]
     
-    # Call Hugging Face API for the LLM
-    final_messages = build_rag_prompt(question, retrieved_chunks)
-    hf_token = os.getenv("HF_TOKEN")
-    hf_url = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
+    # Build a simple prompt for the tiny LLM
+    context_text = "\n".join(retrieved_chunks)
+    prompt = f"Context: {context_text}\n\nQuestion: {question}\nAnswer based only on the context:"
     
-    headers = {"Authorization": f"Bearer {hf_token}", "Content-Type": "application/json"}
-    data = {"messages": final_messages, "max_tokens": 500}
+    # Generate answer locally!
+    result = tiny_llm(prompt)
+    answer = result[0]['generated_text']
     
-    try:
-        response = requests.post(hf_url, headers=headers, json=data)
-        response.raise_for_status()
-        result_json = response.json()
-        answer = result_json[0]["generated_text"]
-        if "assistant" in answer:
-            answer = answer.split("assistant")[-1].strip()
-        return {"answer": answer, "sources": retrieved_chunks}
-    except Exception as e:
-        return {"error": str(e)}
+    # Clean up the output (remove the prompt from the response)
+    if "Answer based only on the context:" in answer:
+        answer = answer.split("Answer based only on the context:")[-1].strip()
+        
+    return {"answer": answer, "sources": retrieved_chunks}
 
 # --- USER INTERFACE ---
-
 with st.sidebar:
     st.header("📁 Document Upload")
     uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
@@ -85,7 +86,7 @@ with st.sidebar:
             with st.spinner("Extracting text, generating embeddings..."):
                 result = process_pdf_locally(uploaded_file)
                 st.success(result)
-                st.session_state.messages = [] # Clear chat history
+                st.session_state.messages = []
 
 st.title("💬 Chat with your Document")
 
