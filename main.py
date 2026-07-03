@@ -1,0 +1,1 @@
+print("document QA system is starting up...")

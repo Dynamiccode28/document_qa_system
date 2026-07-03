@@ -1,0 +1,97 @@
+import os
+import shutil
+import numpy as np
+import faiss
+import requests
+from fastapi import FastAPI,UploadFile,File,HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+#import implemented custom modules
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from src.pdf_extractor import extract_text_from_pdf
+from src.text_chunker import chunk_text
+from src.embeder import model
+from src.prompt_builder import build_rag_prompt
+
+#-----global state------
+#This variables stay alive in RAM between different reuests from user
+vector_index=None
+text_chunks=None
+is_ready=False
+
+#------ FASTAPI APP ------
+app=FastAPI(title="RAG Document QA API")
+
+#----- DATA MODELS -----
+class QuestionRequest(BaseModel):
+    text:str
+
+#ENDPOINT
+
+@app.get("/")
+def health_check():
+    return {"status":"API is running!","document_loaded":is_ready}
+
+@app.post("/upload")
+async def upload_pdf(file:UploadFile=File(...)):
+    global vector_index,text_chunks,is_ready
+
+    #1. enforcing 10MB size limits
+    max_size=10*1024*1025
+    if file.size>max_size:
+        raise HTTPException(status_code=413,detail="File too large,Max size is 10 MB")
+    
+    #2.save the uploded file to data/folder
+    save_path=os.path.join("data",file.filename)
+    with open(save_path,"wb") as buffer:
+        shutil.copyfileobj(file.file,buffer)
+    try:
+        #3.run the rag preparation pipeline
+        raw_text=extract_text_from_pdf(save_path)
+        text_chunks=chunk_text(raw_text)
+        embeddings=model.encode(text_chunks)
+        embeddings=np.array(embeddings).astype('float32')
+        dimension=embeddings.shape[1]
+        vector_index=faiss.IndexFlatL2(dimension)
+        vector_index.add(embeddings)
+        is_ready=True
+        return {"message": f"Successfully processed {file.filename}. Ready for questions!"}
+    except Exception as e:
+        is_ready=False
+        raise HTTPException(status_code=500,detail=f"Failed to process PDF:{str(e)}")
+    
+@app.post("/ask")
+def ask_question(request: QuestionRequest):
+    global vector_index, text_chunks, is_ready
+    
+    # 1. Check if a document has been uploaded
+    if not is_ready or vector_index is None:
+        raise HTTPException(status_code=400, detail="No document loaded. Please upload a PDF first.")
+        
+    # 2. Retrieve relevant chunks using FAISS
+    query_vector = model.encode([request.text]).astype('float32')
+    distances, indices = vector_index.search(query_vector, k=3)
+    retrieved_chunks = [text_chunks[idx] for idx in indices[0]]
+    
+    # 3. Build the prompt and ask Ollama
+    final_prompt = build_rag_prompt(request.text, retrieved_chunks)
+    
+    url = "http://localhost:11434/api/generate"
+    data = {
+        "model": "llama3.1:8b", # or llama3.2:3b
+        "prompt": final_prompt,
+        "stream": False
+    }
+    
+    try:
+        response = requests.post(url, json=data)
+        answer = response.json().get("response", "Error: Ollama returned an empty response.")
+        
+        return {
+            "answer": answer,
+            "sources": retrieved_chunks
+        }
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="Ollama is not running. Please start Ollama.")

@@ -1,0 +1,15 @@
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Data files (PDFs uploaded by users)
+data/
+
+# Downloaded models (large files)
+models/
+
+# IDE settings
+.vscode/
