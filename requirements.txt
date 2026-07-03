@@ -1,5 +1,5 @@
 pypdf2==3.0.1
-sentence-transformers==2.2.2
+sentence-transformers
 faiss-cpu==1.8.0
 langchain==0.0.352
 fastapi==0.104.1
