@@ -9,158 +9,355 @@ pinned: false
 ---
 
 
+# ContextQuest: Local RAG Document QA System
 
-📄 ContextQuest: Local RAG Document QA System
-A fully containerized, open-source Retrieval-Augmented Generation (RAG) application. Upload a PDF document and chat with it. The AI answers strictly based on the content of your document, complete with verifiable source citations.
+## Overview
 
-No paid APIs (like OpenAI) are used. The entire pipeline runs locally or in a free cloud container, ensuring complete data privacy.
+ContextQuest is a fully containerized, open-source Retrieval-Augmented Generation (RAG) application that enables users to upload a PDF document and interact with it through a conversational interface.
 
-🌐 Live Application
-Access the app directly in your browser here:
-👉[ https://dynamiccode28-document-qa-system.hf.space](https://huggingface.co/spaces/SVM28/document-qa-system?logs=build)
+The system generates answers strictly from the uploaded document and provides source citations for every response, ensuring transparency and verifiability.
 
-(Note: If the app is asleep, click "Wake Up" and wait ~30 seconds for the server to spin up).
-
-How to Use (End-User Guide)
-Interacting with the system is as simple as using a chat app:
-
-Upload: In the left sidebar, click "Browse files" and select any text-based PDF (max 10MB).
-Process: Click the "Process Document" button. The system will extract the text, break it down, and index it (takes ~5-10 seconds).
-Chat: Type your question in the bottom text box and press Enter.
-Verify: Click "📄 View Source Chunks" under any answer to see the exact paragraphs from your PDF that the AI used to formulate its response.
-
-How It Works (System Architecture)
-This project implements a custom-built RAG pipeline. It is separated into two distinct phases: Ingestion and Querying.
-
-Phase 1: Document Ingestion (Preparation)
-PDF File → [Text Extraction] → Raw Text
-↓
-Raw Text → [Text Preprocessing] → Cleaned Text (Fixes PDF line-break bugs)
-↓
-Cleaned Text → [Semantic Chunking] → List of ~500 character chunks
-↓
-Chunks → [Embedding Model] → 384-Dimensional Vectors
-↓
-Vectors → [FAISS Index] → In-Memory Vector Database
-
-text
-
-
-### Phase 2: Querying (Question Answering)
-User Question → [Embedding Model] → Question Vector
-↓
-Question Vector → [FAISS Similarity Search] → Top 3 Relevant Chunks
-↓
-Chunks + Question → [Prompt Engineering] -> Structured LLM Prompt
-↓
-Prompt → [Local LLM] -> Final Generated Answer + Citations
-
-text
-
-
-
-##  Technology Stack
-
-| Component | Technology | Purpose |
-| :--- | :--- | :--- |
-| **Frontend UI** | Streamlit | Chat-based user interface |
-| **Text Processing** | PyPDF2, Regex | PDF parsing & whitespace normalization |
-| **Embeddings** | `all-MiniLM-L6-v2` | Converts text to 384-dimension vectors |
-| **Vector DB** | FAISS (CPU) | Blazing-fast similarity search |
-| **LLM (Cloud)** | Qwen2.5-0.5B-Instruct | Lightweight model fitting in free-tier RAM |
-| **LLM (Local)** | Ollama (Llama 3) | For local, high-power testing |
-| **Deployment** | Docker, Hugging Face Spaces | Containerized cloud hosting |
+The entire pipeline operates using open-source models without relying on paid APIs such as OpenAI, allowing the application to run locally or in a free cloud environment while maintaining complete data privacy.
 
 ---
 
-##  Important Architectural Insights & Design Decisions
+## Live Demo
 
-As an educational project built from scratch (without LangChain), several deliberate engineering decisions were made:
+Application:
 
-*   **Why 500-Character Chunks?** 
-    The embedding model (`all-MiniLM-L6-v2`) has a strict limit of 512 tokens. Instead of cutting at exactly 512 tokens (which might slice a word in half), we cut at 500 *characters* (~125 tokens) at natural sentence boundaries (`.` `!` `?`). This leaves a massive safety buffer and ensures semantic completeness.
-*   **The PDF Newline Bug:** 
-    PyPDF2 often injects `\n` at the end of every line in a PDF. If fed directly to an embedding model, it destroys the horizontal semantic flow. A crucial preprocessing step (`re.sub(r'\n+', '\n', text)`) was added to flatten the text before chunking.
-*   **Strict Prompting:** 
-    The LLM is given a strict system prompt: *"Answer ONLY using the context. If the answer is not present, say 'I do not have enough information.'"* This prevents hallucinations and ensures strict RAG behavior.
-*   **Cloud vs. Local Architecture Pivot:** 
-    To keep the project 100% free, the app is deployed on Hugging Face Spaces (limited to 1GB RAM). Because Llama-3-8B requires ~5GB RAM, the cloud version uses a highly efficient `Qwen-0.5B` model inside the Docker container. The local version uses Ollama for maximum quality.
+https://dynamiccode28-document-qa-system.hf.space
 
-## ⚠️ Limitations & Constraints
+Repository Deployment:
 
-- **Scanned PDFs:** The system uses text extraction, not OCR. If the PDF is a flat image of text (like a scanned book), PyPDF2 will return empty strings. 
-- **Document Size:** To prevent Out-Of-Memory (OOM) errors on free cloud tiers, file uploads are restricted to 10MB.
-- **Small LLM Context:** The cloud LLM (0.5B parameters) is incredibly fast and lightweight, but may struggle with highly complex, multi-hop reasoning across 5+ chunks compared to massive models like GPT-4.
+https://huggingface.co/spaces/SVM28/document-qa-system
 
-## Running Locally (For Developers)
+> **Note:** If the application is in sleep mode, click **Wake Up** and wait approximately 30 seconds for the container to start.
 
-If you want to run the high-power version using Ollama and Llama 3:
+---
+
+# Features
+
+- Retrieval-Augmented Generation (RAG) pipeline built from scratch
+- Upload and query PDF documents
+- Source-grounded responses with citations
+- Semantic document chunking
+- FAISS-based vector similarity search
+- Fully open-source technology stack
+- No dependency on paid LLM APIs
+- Dockerized deployment
+- Local execution with Ollama support
+- Cloud deployment on Hugging Face Spaces
+
+---
+
+# How to Use
+
+## Step 1: Upload a Document
+
+Click **Browse files** from the sidebar and upload a text-based PDF document (maximum size: 10 MB).
+
+## Step 2: Process the Document
+
+Click **Process Document**.
+
+The application will:
+
+- Extract text
+- Clean formatting artifacts
+- Create semantic chunks
+- Generate embeddings
+- Build a FAISS vector index
+
+Processing typically takes **5–10 seconds**.
+
+## Step 3: Ask Questions
+
+Enter your question in the chat input and press **Enter**.
+
+The system retrieves relevant document sections before generating an answer.
+
+## Step 4: Verify the Response
+
+Expand **View Source Chunks** beneath any response to inspect the exact passages retrieved from the uploaded document.
+
+---
+
+# System Architecture
+
+The application follows a two-stage Retrieval-Augmented Generation pipeline.
+
+## Phase 1: Document Ingestion
+
+```text
+PDF Document
+      │
+      ▼
+Text Extraction (PyPDF2)
+      │
+      ▼
+Text Preprocessing
+(Removes PDF formatting artifacts)
+      │
+      ▼
+Semantic Chunking
+(~500-character chunks)
+      │
+      ▼
+Sentence Embeddings
+(all-MiniLM-L6-v2)
+      │
+      ▼
+384-Dimensional Vector Embeddings
+      │
+      ▼
+FAISS Vector Index
+```
+
+---
+
+## Phase 2: Query Processing
+
+```text
+User Question
+      │
+      ▼
+Question Embedding
+      │
+      ▼
+FAISS Similarity Search
+(Top-K Relevant Chunks)
+      │
+      ▼
+Retrieved Context
++
+User Question
+      │
+      ▼
+Prompt Construction
+      │
+      ▼
+Large Language Model
+      │
+      ▼
+Grounded Response
++
+Source Citations
+```
+
+---
+
+# Technology Stack
+
+| Component | Technology | Purpose |
+|------------|------------|---------|
+| Frontend | Streamlit | Interactive chat interface |
+| Backend | FastAPI | REST API |
+| PDF Processing | PyPDF2, Regex | Text extraction and preprocessing |
+| Embedding Model | all-MiniLM-L6-v2 | Semantic text embeddings |
+| Vector Database | FAISS (CPU) | Similarity search |
+| Cloud LLM | Qwen2.5-0.5B-Instruct | Lightweight inference |
+| Local LLM | Ollama (Llama 3.1 8B) | Local inference |
+| Deployment | Docker, Hugging Face Spaces | Containerized deployment |
+
+---
+
+# Project Structure
+
+```text
+document_qa_system/
+│
+├── app.py                 # Streamlit frontend
+├── api.py                 # FastAPI backend
+├── requirements.txt
+├── Dockerfile
+├── README.md
+│
+├── src/
+│   ├── preprocessing.py
+│   ├── chunking.py
+│   ├── embeddings.py
+│   ├── vector_store.py
+│   └── prompt.py
+│
+├── models/
+│
+└── assets/
+```
+
+---
+
+# Design Decisions
+
+## 1. Semantic Chunking Strategy
+
+The embedding model (`all-MiniLM-L6-v2`) accepts a maximum of 512 tokens.
+
+Instead of splitting exactly at the token limit, the application creates chunks of approximately **500 characters**, ending at natural sentence boundaries whenever possible.
+
+This approach:
+
+- Preserves semantic meaning
+- Avoids cutting sentences in half
+- Maintains a comfortable safety margin below the token limit
+
+---
+
+## 2. PDF Text Normalization
+
+PDF extraction frequently introduces unwanted newline characters.
+
+Before chunking, the extracted text is normalized using regular expressions to restore proper sentence flow.
+
+```python
+re.sub(r'\n+', '\n', text)
+```
+
+This preprocessing significantly improves embedding quality and retrieval accuracy.
+
+---
+
+## 3. Grounded Prompt Engineering
+
+The language model receives a strict instruction:
+
+> Answer only using the provided context. If the answer cannot be found in the context, respond that there is insufficient information.
+
+This minimizes hallucinations and ensures answers remain grounded in the uploaded document.
+
+---
+
+## 4. Cloud Deployment Strategy
+
+The application is deployed on the free tier of Hugging Face Spaces, which provides limited memory resources.
+
+Because larger models such as Llama 3.1 8B exceed the available memory, the cloud deployment uses **Qwen2.5-0.5B-Instruct**, which offers an effective balance between inference quality and resource efficiency.
+
+For local execution, the application supports **Ollama** with **Llama 3.1 8B** for improved response quality.
+
+---
+
+# Limitations
+
+### Scanned PDFs
+
+The application performs text extraction rather than Optical Character Recognition (OCR).
+
+Image-only or scanned PDFs cannot be processed unless OCR is added.
+
+---
+
+### File Size
+
+Uploads are restricted to **10 MB** to prevent memory exhaustion on free cloud infrastructure.
+
+---
+
+### Lightweight Cloud Model
+
+The cloud deployment uses a compact language model.
+
+While efficient, it may not perform as well as larger models when answering highly complex or multi-step reasoning questions.
+
+---
+
+# Running Locally
+
+## Clone the Repository
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/Dynamiccode28/document_qa_system.git
+
 cd document_qa_system
+```
 
-# 2. Setup environment
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Mac/Linux
+---
 
-# 3. Install dependencies
-pip install -r requirements.txt
+## Create a Virtual Environment
 
-# 4. Start Ollama and pull the model (requires Ollama installed on your system)
-ollama pull llama3.1:8b
-
-# 5. Run the backend API
-python -m uvicorn api:app --reload
-
-# 6. In a new terminal, run the UI
-streamlit run app.py
-
-## ⚠️ Limitations & Constraints
-
-- **Scanned PDFs:** The system uses text extraction, not OCR. If the PDF is a flat image of text (like a scanned book), PyPDF2 will return empty strings. 
-- **Document Size:** To prevent Out-Of-Memory (OOM) errors on free cloud tiers, file uploads are restricted to 10MB.
-- **Small LLM Context:** The cloud LLM (0.5B parameters) is incredibly fast and lightweight, but may struggle with highly complex, multi-hop reasoning across 5+ chunks compared to massive models like GPT-4.
-
-## 🏃‍♂️ Running Locally (For Developers)
-
-If you want to run the high-power version using Ollama and Llama 3:
+### Windows
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/Dynamiccode28/document_qa_system.git
-cd document_qa_system
-
-# 2. Setup environment
 python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Mac/Linux
 
-# 3. Install dependencies
+venv\Scripts\activate
+```
+
+### macOS / Linux
+
+```bash
+python -m venv venv
+
+source venv/bin/activate
+```
+
+---
+
+## Install Dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-# 4. Start Ollama and pull the model (requires Ollama installed on your system)
+---
+
+## Pull the Local LLM
+
+Install Ollama and download the model.
+
+```bash
 ollama pull llama3.1:8b
+```
 
-# 5. Run the backend API
+---
+
+## Start the Backend
+
+```bash
 python -m uvicorn api:app --reload
+```
 
-# 6. In a new terminal, run the UI
+---
+
+## Launch the Frontend
+
+Open a new terminal.
+
+```bash
 streamlit run app.py
-📜 License
-This project is open source and available under the MIT License.
+```
 
-Built from scratch to understand the mathematics of embeddings, the mechanics of vector search, and the architecture of Large Language Models.
+---
 
-text
+# Future Improvements
 
+- OCR support for scanned documents
+- Hybrid search (BM25 + Dense Retrieval)
+- Metadata-aware retrieval
+- Persistent vector database
+- Multi-document retrieval
+- Conversation memory
+- Streaming responses
+- Evaluation pipeline
+- Reranking models
+- GPU acceleration
 
-### Why this README is professional:
-1. **The YAML Block:** It's at the very top, which is required by Hugging Face to know it's a Docker app.
-2. **Immediate Value:** The "Live Application" link is right at the top. Recruiters don't want to read a manual to see your work; they want to click a link.
-3. **End-User vs. Developer Separation:** It tells a normal person how to use it in 3 steps, but has a whole "Running Locally" section for technical interviewers.
-4. **The "Architectural Insights" Section:** This is the secret sauce. It proves you didn't just copy a tutorial—you understand *why* chunk sizes matter, *why* you preprocess text, and *how* memory limits affect cloud architecture. 
+---
 
-**Push this to GitHub one last time, and your project is perfectly wrapped up!**
+# Learning Objectives
+
+This project was developed from scratch to gain a practical understanding of:
+
+- Retrieval-Augmented Generation (RAG)
+- Semantic embeddings
+- Vector databases
+- FAISS similarity search
+- Prompt engineering
+- Large Language Models
+- End-to-end AI system architecture
+- Docker containerization
+- Local and cloud deployment
+
+No high-level orchestration frameworks (such as LangChain) were used in the core implementation, allowing every stage of the RAG pipeline to be understood and implemented directly.
+
+---
+
