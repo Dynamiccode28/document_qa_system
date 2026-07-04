@@ -25,10 +25,6 @@ The entire pipeline operates using open-source models without relying on paid AP
 
 Application:
 
-https://dynamiccode28-document-qa-system.hf.space
-
-Repository Deployment:
-
 https://huggingface.co/spaces/SVM28/document-qa-system
 
 > **Note:** If the application is in sleep mode, click **Wake Up** and wait approximately 30 seconds for the container to start.
